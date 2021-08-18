@@ -263,38 +263,38 @@ class HuobiSpotRestApi(RestClient):
         )
 
         # 如果请求失败则终止循环
-        history = []
+        history: List[BarData] = []
 
         if resp.status_code // 100 != 2:
-            msg = f"获取历史数据失败，状态码：{resp.status_code}，信息：{resp.text}"
+            msg: str = f"获取历史数据失败，状态码：{resp.status_code}，信息：{resp.text}"
             self.gateway.write_log(msg)
         else:
-            data = resp.json()
+            data: dict = resp.json()
             if not data:
-                msg = f"获取历史数据为空"
+                msg: str = f"获取历史数据为空"
                 self.gateway.write_log(msg)
             else:
-                for d in data["data"]:
-                    dt = generate_datetime(d["id"])
+                for row in data["data"]:
+                    dt: datetime = generate_datetime(row["id"])
 
                     bar = BarData(
                         symbol=req.symbol,
                         exchange=req.exchange,
                         datetime=dt,
                         interval=req.interval,
-                        volume=d["vol"],
-                        open_price=d["open"],
-                        high_price=d["high"],
-                        low_price=d["low"],
-                        close_price=d["close"],
+                        volume=row["vol"],
+                        open_price=row["open"],
+                        high_price=row["high"],
+                        low_price=row["low"],
+                        close_price=row["close"],
                         gateway_name=self.gateway_name
                     )
                     history.append(bar)
 
                 history.reverse()
-                begin = history[0].datetime
-                end = history[-1].datetime
-                msg = f"获取历史数据成功，{req.symbol} - {req.interval.value}，{begin} - {end}"
+                begin: datetime = history[0].datetime
+                end: datetime = history[-1].datetime
+                msg: str = f"获取历史数据成功，{req.symbol} - {req.interval.value}，{begin} - {end}"
                 self.gateway.write_log(msg)
 
         return history
@@ -401,8 +401,8 @@ class HuobiSpotRestApi(RestClient):
             quote_currency: str = d["quote-currency"]
             name: str = f"{base_currency.upper()}/{quote_currency.upper()}"
 
-            pricetick = 1 / pow(10, d["price-precision"])
-            min_volume = 1 / pow(10, d["amount-precision"])
+            pricetick: float = 1 / pow(10, d["price-precision"])
+            min_volume: float = 1 / pow(10, d["amount-precision"])
 
             contract: ContractData = ContractData(
                 symbol=d["symbol"],
@@ -450,7 +450,6 @@ class HuobiSpotRestApi(RestClient):
         order.status = Status.REJECTED
         self.gateway.on_order(order)
 
-        # Record exception if not ConnectionError
         if not issubclass(exception_type, ConnectionError):
             self.on_error(exception_type, exception_value, tb, request)
 
@@ -497,7 +496,7 @@ class HuobiSpotRestApi(RestClient):
 
 
 class HuobiSpotWebsocketApiBase(WebsocketClient):
-    """"""
+    """火币现货Websocket APIBase"""
 
     def __init__(self, gateway: HuobiSpotGateway) -> None:
         """构造函数"""
@@ -519,7 +518,7 @@ class HuobiSpotWebsocketApiBase(WebsocketClient):
         proxy_host: str,
         proxy_port: int
     ) -> None:
-        """"""
+        """连接Websocket频道"""
         self.key = key
         self.secret = secret
 
@@ -531,8 +530,8 @@ class HuobiSpotWebsocketApiBase(WebsocketClient):
         self.start()
 
     def login(self) -> int:
-        """"""
-        params = create_signature_v2(
+        """用户登录"""
+        params: dict = create_signature_v2(
             self.key,
             "GET",
             self.sign_host,
@@ -540,7 +539,7 @@ class HuobiSpotWebsocketApiBase(WebsocketClient):
             self.secret
         )
 
-        req = {
+        req: dict = {
             "action": "req",
             "ch": "auth",
             "params": params
@@ -549,26 +548,26 @@ class HuobiSpotWebsocketApiBase(WebsocketClient):
         return self.send_packet(req)
 
     def on_login(self, packet: dict) -> None:
-        """"""
+        """用户登录回报"""
         pass
 
     @staticmethod
     def unpack_data(data):
-        """"""
+        """数据解压"""
         if isinstance(data, bytes):
-            buf = zlib.decompress(data, 31)
+            buf: bytes = zlib.decompress(data, 31)
         else:
-            buf = data
+            buf: str = data
 
         return json.loads(buf)
 
     def on_packet(self, packet: dict):
-        """"""
+        """推送数据回报"""
         if "ping" in packet:
-            req = {"pong": packet["ping"]}
+            req: dict = {"pong": packet["ping"]}
             self.send_packet(req)
         elif "action" in packet and packet["action"] == "ping":
-            req = {
+            req: dict = {
                 "action": "pong",
                 "ts": packet["data"]["ts"]
             }
@@ -580,10 +579,9 @@ class HuobiSpotWebsocketApiBase(WebsocketClient):
         else:
             self.on_data(packet)
 
-
     def on_error_msg(self, packet: dict) -> None:
-        """"""
-        msg = packet["err-msg"]
+        """推送错误信息回报"""
+        msg: str = packet["err-msg"]
         if msg == "invalid pong":
             return
 
@@ -591,9 +589,10 @@ class HuobiSpotWebsocketApiBase(WebsocketClient):
 
 
 class HuobiSpotTradeWebsocketApi(HuobiSpotWebsocketApiBase):
-    """"""
+    """火币现货交易Websocket API"""
+
     def __init__(self, gateway):
-        """"""
+        """构造函数"""
         super().__init__(gateway)
 
     def connect(
@@ -603,7 +602,7 @@ class HuobiSpotTradeWebsocketApi(HuobiSpotWebsocketApiBase):
         proxy_host: str,
         proxy_port: int
     ):
-        """"""
+        """连接Websocket交易频道"""
         super().connect(
             key,
             secret,
@@ -613,73 +612,73 @@ class HuobiSpotTradeWebsocketApi(HuobiSpotWebsocketApiBase):
         )
 
     def subscribe_topic(self) -> None:
-        """"""
-        req = {
+        """订阅委托和资金推送"""
+        req: dict = {
             "action": "sub",
             "ch": f"orders#*"
         }
         self.send_packet(req)
 
-        req = {
+        req: dict = {
             "action": "sub",
             "ch": "accounts.update#1"
         }
         self.send_packet(req)
 
     def on_connected(self) -> None:
-        """"""
+        """连接成功回报"""
         self.gateway.write_log("交易Websocket API连接成功")
         self.login()
 
     def on_login(self, packet: dict) -> None:
-        """"""
+        """登录成功回报"""
         if "data" in packet and not packet["data"]:
             self.gateway.write_log("交易Websocket API登录成功")
 
             self.subscribe_topic()
         else:
-            msg = packet["message"]
-            error_msg = f"交易Websocket API登录失败，原因：{msg}"
+            msg: str = packet["message"]
+            error_msg: str = f"交易Websocket API登录失败，原因：{msg}"
             self.gateway.write_log(error_msg)
 
     def on_data(self, packet: dict) -> None:
-        """"""
-        action = packet.get("action", None)
+        """推送数据回报"""
+        action: str = packet.get("action", None)
         if action and action != "sub":
 
-            ch = packet["ch"]
+            ch: str = packet["ch"]
             if "orders" in ch:
                 self.on_order(packet["data"])
             elif "accounts" in ch:
                 self.on_account(packet["data"])
 
     def on_account(self, data: dict) -> None:
-        """"""
+        """资金更新推送"""
         if not data:
             return
 
-        currency = data["currency"]
+        currency: str = data["currency"]
 
-        change_type = data["changeType"]
+        change_type: str = data["changeType"]
         if not change_type:
-            balance = float(data["balance"])
-            frozen = balance - float(data["available"])
+            balance: float = float(data["balance"])
+            frozen: float = balance - float(data["available"])
             currency_balance[currency] = balance
 
         elif "place" in change_type:
             if "available" not in data:
                 return
-            balance = currency_balance[currency]
-            frozen = balance - float(data["available"])
+            balance: float = currency_balance[currency]
+            frozen: float = balance - float(data["available"])
         else:
-            frozen = 0.0
+            frozen: float = 0.0
             if "balance" in data:
-                balance = float(data["balance"])
+                balance: float = float(data["balance"])
             else:
-                balance = float(data["available"])
+                balance: float = float(data["available"])
             currency_balance[currency] = balance
 
-        account = AccountData(
+        account: AccountData = AccountData(
             accountid=currency,
             balance=balance,
             frozen=frozen,
@@ -688,28 +687,26 @@ class HuobiSpotTradeWebsocketApi(HuobiSpotWebsocketApiBase):
         self.gateway.on_account(account)
 
     def on_order(self, data: dict) -> None:
-        """"""
-        orderid = data["clientOrderId"]
-        order = self.gateway.get_order(orderid)
+        """委托更新推送"""
+        orderid: str = data["clientOrderId"]
+        order: OrderData = self.gateway.get_order(orderid)
         if not order:
             return
 
-        traded_volume = float(data.get("tradeVolume", 0))
-
-        contract = symbol_contract_map.get(order.symbol, None)
+        # 将成交数量四舍五入到正确精度
+        traded_volume: float = float(data.get("tradeVolume", 0))
+        contract: ContractData = symbol_contract_map.get(order.symbol, None)
         if contract:
             traded_volume = round_to(traded_volume, contract.min_volume)
 
-        # Push order event
         order.traded += traded_volume
         order.status = STATUS_HUOBI2VT.get(data["orderStatus"], None)
         self.gateway.on_order(order)
 
-        # Push trade event
         if not traded_volume:
             return
 
-        trade = TradeData(
+        trade: TradeData = TradeData(
             symbol=order.symbol,
             exchange=Exchange.HUOBI,
             orderid=order.orderid,
@@ -724,10 +721,10 @@ class HuobiSpotTradeWebsocketApi(HuobiSpotWebsocketApiBase):
 
 
 class HuobiSpotDataWebsocketApi(HuobiSpotWebsocketApiBase):
-    """"""
+    """火币现货行情Websocket API"""
 
     def __init__(self, gateway):
-        """"""
+        """构造函数"""
         super().__init__(gateway)
 
         self.ticks: Dict[str, TickData] = {}
@@ -740,7 +737,7 @@ class HuobiSpotDataWebsocketApi(HuobiSpotWebsocketApiBase):
         proxy_host: str,
         proxy_port: int
     ) -> None:
-        """"""
+        """连接Websocket行情频道"""
         super().connect(
             key,
             secret,
@@ -750,14 +747,14 @@ class HuobiSpotDataWebsocketApi(HuobiSpotWebsocketApiBase):
         )
 
     def on_connected(self) -> None:
-        """"""
+        """连接成功回报"""
         self.gateway.write_log("行情Websocket API连接成功")
 
         for req in list(self.subscribed.values()):
             self.subscribe(req)
 
     def subscribe(self, req: SubscribeRequest) -> None:
-        """"""
+        """订阅行情"""
         if req.symbol not in symbol_contract_map:
             self.gateway.write_log(f"找不到该合约代码{req.symbol}")
             return
@@ -787,31 +784,31 @@ class HuobiSpotDataWebsocketApi(HuobiSpotWebsocketApiBase):
         self.send_packet(req_dict)
 
     def on_data(self, packet: dict) -> None:
-        """"""
-        channel = packet.get("ch", None)
+        """推送数据回报"""
+        channel: str = packet.get("ch", None)
         if channel:
             if "depth.step" in channel:
                 self.on_market_depth(packet)
             elif "detail" in channel:
                 self.on_market_detail(packet)
         elif "err-code" in packet:
-            code = packet["err-code"]
-            msg = packet["err-msg"]
+            code: str = packet["err-code"]
+            msg: str = packet["err-msg"]
             self.gateway.write_log(f"错误代码：{code}, 错误信息：{msg}")
 
     def on_market_depth(self, data: dict) -> None:
         """行情深度推送 """
-        symbol = data["ch"].split(".")[1]
-        tick = self.ticks[symbol]
+        symbol: str = data["ch"].split(".")[1]
+        tick: TickData = self.ticks[symbol]
         tick.datetime = generate_datetime(data["ts"] / 1000)
 
-        bids = data["tick"]["bids"]
+        bids: list = data["tick"]["bids"]
         for n in range(5):
             price, volume = bids[n]
             tick.__setattr__("bid_price_" + str(n + 1), float(price))
             tick.__setattr__("bid_volume_" + str(n + 1), float(volume))
 
-        asks = data["tick"]["asks"]
+        asks: list = data["tick"]["asks"]
         for n in range(5):
             price, volume = asks[n]
             tick.__setattr__("ask_price_" + str(n + 1), float(price))
@@ -822,8 +819,8 @@ class HuobiSpotDataWebsocketApi(HuobiSpotWebsocketApiBase):
 
     def on_market_detail(self, data: dict) -> None:
         """市场细节推送"""
-        symbol = data["ch"].split(".")[1]
-        tick = self.ticks[symbol]
+        symbol: str = data["ch"].split(".")[1]
+        tick: TickData = self.ticks[symbol]
         tick.datetime = generate_datetime(data["ts"] / 1000)
 
         tick_data = data["tick"]
