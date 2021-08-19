@@ -803,13 +803,13 @@ class HuobiSpotDataWebsocketApi(HuobiSpotWebsocketApiBase):
         tick.datetime = generate_datetime(data["ts"] / 1000)
 
         bids: list = data["tick"]["bids"]
-        for n in range(5):
+        for n in range(min(5, len(bids))):
             price, volume = bids[n]
             tick.__setattr__("bid_price_" + str(n + 1), float(price))
             tick.__setattr__("bid_volume_" + str(n + 1), float(volume))
 
         asks: list = data["tick"]["asks"]
-        for n in range(5):
+        for n in range(min(5, len(asks))):
             price, volume = asks[n]
             tick.__setattr__("ask_price_" + str(n + 1), float(price))
             tick.__setattr__("ask_volume_" + str(n + 1), float(volume))
