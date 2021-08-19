@@ -468,21 +468,6 @@ class HuobiSpotRestApi(RestClient):
 
         self.gateway.on_order(order)
 
-    def on_error(
-        self,
-        exception_type: type,
-        exception_value: Exception,
-        tb,
-        request: Request
-    ) -> None:
-        """触发异常回报"""
-        msg = f"触发异常，状态码：{exception_type}，信息：{exception_value}"
-        self.gateway.write_log(msg)
-
-        sys.stderr.write(
-            self.exception_detail(exception_type, exception_value, tb, request)
-        )
-
     def check_error(self, data: dict, func: str = "") -> bool:
         """回报状态检查"""
         if data["status"] != "error":
