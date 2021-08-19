@@ -105,7 +105,7 @@ class HuobiSpotGateway(BaseGateway):
 
     def connect(self, setting: dict) -> None:
         """连接交易接口"""
-        key: str = setting["Key"]
+        key: str = setting["key"]
         secret: str = setting["secret"]
         proxy_host: str = setting["代理地址"]
         proxy_port: str = setting["代理端口"]
