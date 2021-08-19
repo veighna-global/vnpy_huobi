@@ -5,7 +5,6 @@ import json
 import zlib
 import hashlib
 import hmac
-import sys
 from copy import copy
 from datetime import datetime
 import pytz
