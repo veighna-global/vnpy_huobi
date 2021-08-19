@@ -115,8 +115,7 @@ class HuobiSpotGateway(BaseGateway):
         else:
             proxy_port = 0
 
-        self.rest_api.connect(key, secret,
-                              proxy_host, proxy_port)
+        self.rest_api.connect(key, secret,proxy_host, proxy_port)
         self.trade_ws_api.connect(key, secret, proxy_host, proxy_port)
         self.market_ws_api.connect(key, secret, proxy_host, proxy_port)
 
