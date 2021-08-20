@@ -349,19 +349,19 @@ class HuobiFuturesRestApi(RestClient):
                     break
 
                 buf: List[BarData] = []
-                for row in data["data"]:
-                    dt: datetime = generate_datetime(row["id"])
+                for d in data["data"]:
+                    dt: datetime = generate_datetime(d["id"])
 
                     bar: BarData = BarData(
                         symbol=req.symbol,
                         exchange=req.exchange,
                         datetime=dt,
                         interval=req.interval,
-                        volume=row["vol"],
-                        open_price=row["open"],
-                        high_price=row["high"],
-                        low_price=row["low"],
-                        close_price=row["close"],
+                        volume=d["vol"],
+                        open_price=d["open"],
+                        high_price=d["high"],
+                        low_price=d["low"],
+                        close_price=d["close"],
                         gateway_name=self.gateway_name
                     )
                     buf.append(bar)
@@ -974,6 +974,7 @@ class HuobiFuturesDataWebsocketApi(HuobiFuturesWebsocketApiBase):
             tick.__setattr__("ask_volume_" + str(n + 1), float(volume))
 
         if tick.last_price:
+            tick.localtime = datetime.now()
             self.gateway.on_tick(copy(tick))
 
     def on_market_detail(self, data: dict) -> None:
@@ -990,6 +991,7 @@ class HuobiFuturesDataWebsocketApi(HuobiFuturesWebsocketApiBase):
         tick.volume = tick_data["vol"]
 
         if tick.bid_price_1:
+            tick.localtime = datetime.now()
             self.gateway.on_tick(copy(tick))
 
 
