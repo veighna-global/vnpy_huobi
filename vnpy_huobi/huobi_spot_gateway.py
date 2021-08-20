@@ -63,7 +63,7 @@ ORDERTYPE_VT2HUOBI: Dict[Tuple(Direction, OrderType), str] = {
     (Direction.LONG, OrderType.LIMIT): "buy-limit",
     (Direction.SHORT, OrderType.LIMIT): "sell-limit",
 }
-ORDERTYPE_HUOBI2VT: Dict[str, OrderType] = {v: k for k, v in ORDERTYPE_VT2HUOBI.items()}
+ORDERTYPE_HUOBI2VT: Dict[str, Tuple(Direction, OrderType)] = {v: k for k, v in ORDERTYPE_VT2HUOBI.items()}
 
 # 数据频率映射
 INTERVAL_VT2HUOBI: Dict[Interval, str] = {
@@ -84,7 +84,7 @@ class HuobiSpotGateway(BaseGateway):
     vn.py用于对接火币现货账户的交易接口。
     """
 
-    default_setting: Dict[str, Any] = {
+    default_setting: Dict[str, str] = {
         "key": "",
         "secret": "",
         "代理地址": "",
@@ -209,7 +209,6 @@ class HuobiSpotRestApi(RestClient):
         """连接REST服务器"""
         self.key = key
         self.secret = secret
-
         self.host, _ = _split_url(REST_HOST)
 
         self.init(REST_HOST, proxy_host, proxy_port)
@@ -297,7 +296,7 @@ class HuobiSpotRestApi(RestClient):
 
         return history
 
-    def new_orderid(self):
+    def new_orderid(self) -> str:
         """生成本地委托号"""
         prefix: str = datetime.now().strftime("%Y%m%d-%H%M%S-")
 
@@ -584,7 +583,7 @@ class HuobiSpotTradeWebsocketApi(HuobiSpotWebsocketApiBase):
         secret: str,
         proxy_host: str,
         proxy_port: int
-    ):
+    ) -> None:
         """连接Websocket交易频道"""
         super().connect(
             key,
