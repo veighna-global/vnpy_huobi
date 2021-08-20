@@ -220,10 +220,7 @@ class HuobiFuturesRestApi(RestClient):
         self.secret: str = ""
         self.account_id: str = ""
 
-        self.order_count: int = 10000
-        self.order_count_lock: Lock = Lock()
-        self.connect_time: int = 0
-
+        self.order_count: int = 0
         self.positions: Dict[str, PositionData] = {}
         self.currencies: List[str] = set()
 
@@ -261,7 +258,6 @@ class HuobiFuturesRestApi(RestClient):
         self.key = key
         self.secret = secret
         self.host, _ = _split_url(REST_HOST)
-        self.connect_time = int(datetime.now(CHINA_TZ).strftime("%y%m%d%H%M%S"))
 
         self.init(REST_HOST, proxy_host, proxy_port)
         self.start()
@@ -386,25 +382,28 @@ class HuobiFuturesRestApi(RestClient):
 
         return history
 
-    def new_local_orderid(self) -> str:
+    def new_orderid(self) -> str:
         """生成本地委托号"""
-        with self.order_count_lock:
-            self.order_count += 1
-            local_orderid: str = f"{self.connect_time}{self.order_count}"
-            return local_orderid
+        prefix: str = datetime.now().strftime("%Y%m%d-%H%M%S-")
+
+        self.order_count += 1
+        suffix: str = str(self.order_count).rjust(8, "0")
+
+        orderid: str = prefix + suffix
+        return orderid
 
     def send_order(self, req: OrderRequest) -> str:
         """委托下单"""
-        local_orderid: str = self.new_local_orderid()
+        orderid: str = self.new_orderid()
         order: OrderData = req.create_order_data(
-            local_orderid,
+            orderid,
             self.gateway_name
         )
         order.datetime = datetime.now(CHINA_TZ)
 
         data: dict = {
             "contract_code": req.symbol,
-            "client_order_id": int(local_orderid),
+            "client_order_id": int(orderid),
             "price": req.price,
             "volume": int(req.volume),
             "direction": DIRECTION_VT2HUOBIF.get(req.direction, ""),
@@ -433,10 +432,10 @@ class HuobiFuturesRestApi(RestClient):
         vt_orderids: List[str] = []
 
         for req in reqs:
-            local_orderid: str = self.new_local_orderid()
+            orderid: str = self.new_orderid()
 
             order: OrderData = req.create_order_data(
-                local_orderid,
+                orderid,
                 self.gateway_name
             )
             order.datetime = datetime.now(CHINA_TZ)
@@ -444,7 +443,7 @@ class HuobiFuturesRestApi(RestClient):
 
             d: dict = {
                 "contract_code": req.symbol,
-                "client_order_id": int(local_orderid),
+                "client_order_id": int(orderid),
                 "price": req.price,
                 "volume": int(req.volume),
                 "direction": DIRECTION_VT2HUOBIF.get(req.direction, ""),
