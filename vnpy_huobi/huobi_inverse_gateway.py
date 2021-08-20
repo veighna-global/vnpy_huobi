@@ -212,10 +212,7 @@ class HuobiInverseRestApi(RestClient):
         self.secret: str = ""
         self.account_id: str = ""
 
-        self.order_count: int = 10000
-        self.order_count_lock: Lock = Lock()
-        self.connect_time: int = 0
-
+        self.order_count: int = 0
         self.positions: Dict[str, PositionData] = {}
         self.contract_codes: set = set()
 
@@ -254,7 +251,6 @@ class HuobiInverseRestApi(RestClient):
         self.key = key
         self.secret = secret
         self.host, _ = _split_url(REST_HOST)
-        self.connect_time = int(datetime.now(CHINA_TZ).strftime("%y%m%d%H%M%S"))
 
         self.init(REST_HOST, proxy_host, proxy_port)
         self.start()
@@ -279,17 +275,18 @@ class HuobiInverseRestApi(RestClient):
             callback=self.on_query_position
         )
 
-    def query_order(self, contract_code: str) -> None:
+    def query_order(self) -> None:
         """查询合约信息"""
-        data: dict = {"contract_code": contract_code}
+        for contract_code in self.contract_codes:
+            data: dict = {"contract_code": contract_code}
 
-        self.add_request(
-            method="POST",
-            path="/swap-api/v1/swap_openorders",
-            callback=self.on_query_order,
-            data=data,
-            extra=contract_code
-        )
+            self.add_request(
+                method="POST",
+                path="/swap-api/v1/swap_openorders",
+                callback=self.on_query_order,
+                data=data,
+                extra=contract_code
+            )
 
     def query_contract(self) -> None:
         """查询合约信息"""
@@ -381,25 +378,28 @@ class HuobiInverseRestApi(RestClient):
 
         return history
 
-    def new_local_orderid(self) -> str:
+    def new_orderid(self) -> str:
         """生成本地委托号"""
-        with self.order_count_lock:
-            self.order_count += 1
-            local_orderid: str = f"{self.connect_time}{self.order_count}"
-            return local_orderid
+        prefix: str = datetime.now().strftime("%Y%m%d-%H%M%S-")
+
+        self.order_count += 1
+        suffix: str = str(self.order_count).rjust(8, "0")
+
+        orderid: str = prefix + suffix
+        return orderid
 
     def send_order(self, req: OrderRequest) -> str:
         """委托下单"""
-        local_orderid: str = self.new_local_orderid()
+        orderid: str = self.new_orderid()
         order: OrderData = req.create_order_data(
-            local_orderid,
+            orderid,
             self.gateway_name
         )
         order.datetime = datetime.now(CHINA_TZ)
 
         data: dict = {
             "contract_code": req.symbol,
-            "client_order_id": int(local_orderid),
+            "client_order_id": int(orderid),
             "price": req.price,
             "volume": int(req.volume),
             "direction": DIRECTION_VT2HUOBIS.get(req.direction, ""),
@@ -428,10 +428,10 @@ class HuobiInverseRestApi(RestClient):
         vt_orderids: List[str] = []
 
         for req in reqs:
-            local_orderid: str = self.new_local_orderid()
+            orderid: str = self.new_orderid()
 
             order: OrderData = req.create_order_data(
-                local_orderid,
+                orderid,
                 self.gateway_name
             )
             order.datetime = datetime.now(CHINA_TZ)
@@ -439,7 +439,7 @@ class HuobiInverseRestApi(RestClient):
 
             d: dict = {
                 "contract_code": req.symbol,
-                "client_order_id": int(local_orderid),
+                "client_order_id": int(orderid),
                 "price": req.price,
                 "volume": int(req.volume),
                 "direction": DIRECTION_VT2HUOBIS.get(req.direction, ""),
@@ -565,11 +565,6 @@ class HuobiInverseRestApi(RestClient):
 
         self.gateway.write_log(f"{request.extra}活动委托信息查询成功")
 
-        if self.order_codes:
-            sleep(0.1)
-            contract_code = self.order_codes.pop()
-            self.query_order(contract_code)
-
     def on_query_contract(self, data: dict, request: Request) -> None:
         """合约信息查询回报"""
         if self.check_error(data, "查询合约"):
@@ -594,10 +589,7 @@ class HuobiInverseRestApi(RestClient):
 
         self.gateway.write_log("合约信息查询成功")
 
-        # 开始查询未成交委托信息
-        self.order_codes = copy(self.contract_codes)
-        contract_code = self.order_codes.pop()
-        self.query_order(contract_code)
+        self.query_order()
 
     def on_send_order(self, data: dict, request: Request) -> None:
         """委托下单回报"""
