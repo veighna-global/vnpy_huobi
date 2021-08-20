@@ -346,8 +346,9 @@ class HuobiSpotRestApi(RestClient):
         self.add_request(
             method="POST",
             path="/v1/order/orders/submitCancelClientOrder",
-            data=data,
             callback=self.on_cancel_order,
+            on_failed=self.on_cancel_order_failed,
+            data=data,
             extra=req
         )
 
@@ -452,18 +453,12 @@ class HuobiSpotRestApi(RestClient):
 
     def on_cancel_order(self, data: dict, request: Request) -> None:
         """委托撤单回报"""
-        cancel_request = request.extra
-        order: OrderData = self.gateway.get_order(cancel_request.orderid)
-        if not order:
-            return
+        self.check_error(data, "撤单")
 
-        if self.check_error(data, "撤单"):
-            order.status = Status.REJECTED
-        else:
-            order.status = Status.CANCELLED
-            self.gateway.write_log(f"委托撤单成功：{order.orderid}")
-
-        self.gateway.on_order(order)
+    def on_cancel_order_failed(self, status_code: str, request: Request) -> None:
+        """委托撤单失败服务器报错回报"""
+        msg: str = f"撤单失败，状态码：{status_code}，信息：{request.response.text}"
+        self.gateway.write_log(msg)
 
     def check_error(self, data: dict, func: str = "") -> bool:
         """回报状态检查"""
