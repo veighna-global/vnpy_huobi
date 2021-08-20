@@ -8,7 +8,7 @@ import hmac
 from copy import copy
 from datetime import datetime
 import pytz
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Tuple
 from vnpy.trader.utility import round_to
 
 from vnpy_rest import RestClient, Request, Response
@@ -534,7 +534,7 @@ class HuobiSpotWebsocketApiBase(WebsocketClient):
         pass
 
     @staticmethod
-    def unpack_data(data):
+    def unpack_data(data) -> json.JSONDecoder:
         """数据解压"""
         if isinstance(data, bytes):
             buf: bytes = zlib.decompress(data, 31)
@@ -543,7 +543,7 @@ class HuobiSpotWebsocketApiBase(WebsocketClient):
 
         return json.loads(buf)
 
-    def on_packet(self, packet: dict):
+    def on_packet(self, packet: dict) -> None:
         """推送数据回报"""
         if "ping" in packet:
             req: dict = {"pong": packet["ping"]}
