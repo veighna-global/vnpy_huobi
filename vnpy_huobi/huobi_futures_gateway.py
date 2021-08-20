@@ -5,11 +5,10 @@ import json
 import zlib
 import hashlib
 import hmac
-import sys
 from copy import copy
 from datetime import datetime, timedelta
 from threading import Lock
-from typing import Sequence, Dict, List
+from typing import Sequence, Dict, List, Any
 import pytz
 
 from vnpy.event import Event, EventEngine
@@ -60,13 +59,13 @@ STATUS_HUOBIF2VT: Dict[str, Status] = {
 }
 
 # 委托类型映射
-ORDERTYPE_VT2HUOBIF: Dict[OrderType, str] = {
+ORDERTYPE_VT2HUOBIF: Dict[OrderType, Any] = {
     OrderType.MARKET: "opponent",
     OrderType.LIMIT: "limit",
     OrderType.FOK: "fok",
     OrderType.FAK: "ioc"
 }
-ORDERTYPE_HUOBIF2VT: Dict[str, OrderType] = {v: k for k, v in ORDERTYPE_VT2HUOBIF.items()}
+ORDERTYPE_HUOBIF2VT: Dict[Any, OrderType] = {v: k for k, v in ORDERTYPE_VT2HUOBIF.items()}
 ORDERTYPE_HUOBIF2VT[1] = OrderType.LIMIT
 ORDERTYPE_HUOBIF2VT[3] = OrderType.MARKET
 ORDERTYPE_HUOBIF2VT[4] = OrderType.MARKET
@@ -471,7 +470,6 @@ class HuobiFuturesRestApi(RestClient):
             on_error=self.on_send_orders_error,
             on_failed=self.on_send_orders_failed
         )
-
         return vt_orderids
 
     def cancel_order(self, req: CancelRequest) -> None:
@@ -554,9 +552,9 @@ class HuobiFuturesRestApi(RestClient):
             dt: datetime = generate_datetime(timestamp / 1000)
 
             if d["client_order_id"]:
-                orderid = d["client_order_id"]
+                orderid: int = d["client_order_id"]
             else:
-                orderid = d["order_id"]
+                orderid: int = d["order_id"]
 
             order: OrderData = OrderData(
                 orderid=orderid,
@@ -637,10 +635,10 @@ class HuobiFuturesRestApi(RestClient):
 
     def on_cancel_order_failed(self, status_code: str, request: Request) -> None:
         """委托撤单失败服务器报错回报"""
-        msg = f"撤单失败，状态码：{status_code}，信息：{request.response.text}"
+        msg: str = f"撤单失败，状态码：{status_code}，信息：{request.response.text}"
         self.gateway.write_log(msg)
 
-    def on_send_orders(self, data, request) -> None:
+    def on_send_orders(self, data: dict, request: Request) -> None:
         """批量下单回报"""
         orders: List[OrderData] = request.extra
 
@@ -731,7 +729,7 @@ class HuobiFuturesWebsocketApiBase(WebsocketClient):
     def login(self) -> int:
         """用户登录"""
 
-        params = {
+        params: dict = {
             "op": "auth",
             "type": "api"
         }
@@ -743,11 +741,11 @@ class HuobiFuturesWebsocketApiBase(WebsocketClient):
         pass
 
     @staticmethod
-    def unpack_data(data):
+    def unpack_data(data) -> json.JSONDecoder:
         """数据解压"""
         return json.loads(zlib.decompress(data, 31))
 
-    def on_packet(self, packet: dict):
+    def on_packet(self, packet: dict) -> None:
         """推送数据回报"""
         if "ping" in packet:
             req: dict = {"pong": packet["ping"]}
@@ -799,7 +797,7 @@ class HuobiFuturesTradeWebsocketApi(HuobiFuturesWebsocketApiBase):
 
     def subscribe(self) -> None:
         """订阅委托推送"""
-        req = {
+        req: dict = {
             "op": "sub",
             "topic": f"orders.*"
         }
