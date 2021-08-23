@@ -160,10 +160,6 @@ class HuobiInverseGateway(BaseGateway):
         """委托撤单"""
         self.rest_api.cancel_order(req)
 
-    def send_orders(self, reqs: Sequence[OrderRequest]) -> str:
-        """批量下单"""
-        return self.rest_api.send_orders(reqs)
-
     def query_account(self) -> None:
         """查询资金"""
         self.rest_api.query_account()
@@ -423,51 +419,6 @@ class HuobiInverseRestApi(RestClient):
         self.gateway.on_order(order)
         return order.vt_orderid
 
-    def send_orders(self, reqs: Sequence[OrderRequest]) -> List[str]:
-        """批量下单"""
-        orders_data: List[Dict] = []
-        orders: List[OrderData] = []
-        vt_orderids: List[str] = []
-
-        for req in reqs:
-            orderid: str = self.new_orderid()
-
-            order: OrderData = req.create_order_data(
-                orderid,
-                self.gateway_name
-            )
-            order.datetime = datetime.now(CHINA_TZ)
-            self.gateway.on_order(order)
-
-            d: dict = {
-                "contract_code": req.symbol,
-                "client_order_id": int(orderid),
-                "price": req.price,
-                "volume": int(req.volume),
-                "direction": DIRECTION_VT2HUOBIS.get(req.direction, ""),
-                "offset": OFFSET_VT2HUOBIS.get(req.offset, ""),
-                "order_price_type": ORDERTYPE_VT2HUOBIS.get(req.type, ""),
-                "lever_rate": 20
-            }
-
-            orders_data.append(d)
-            orders.append(order)
-            vt_orderids.append(order.vt_orderid)
-
-        data: dict = {
-            "orders_data": orders_data
-        }
-        self.add_request(
-            method="POST",
-            path="/linear-swap-api/v1/swap_cross_batchorder",
-            callback=self.on_send_orders,
-            data=data,
-            extra=orders,
-            on_error=self.on_send_orders_error,
-            on_failed=self.on_send_orders_failed
-        )
-        return vt_orderids
-
     def cancel_order(self, req: CancelRequest) -> None:
         """委托撤单"""
         data: dict = {
@@ -627,48 +578,6 @@ class HuobiInverseRestApi(RestClient):
         """委托撤单失败服务器报错回报"""
         msg: str = f"撤单失败，状态码：{status_code}，信息：{request.response.text}"
         self.gateway.write_log(msg)
-
-    def on_send_orders(self, data: dict, request: Request) -> None:
-        """批量下单回报"""
-        orders: List[OrderData] = request.extra
-
-        errors: dict = data.get("errors", None)
-        if errors:
-            for d in errors:
-                ix: int = d["index"]
-                code: int = d["err_code"]
-                msg: str = d["err_msg"]
-
-                order: OrderData = orders[ix]
-                order.status = Status.REJECTED
-                self.gateway.on_order(order)
-
-                msg: str = f"批量委托失败，状态码：{code}，信息：{msg}"
-                self.gateway.write_log(msg)
-
-    def on_send_orders_failed(self, status_code: str, request: Request) -> None:
-        """批量下单失败服务器报错回报"""
-        orders: List[OrderData] = request.extra
-
-        for order in orders:
-            order.status = Status.REJECTED
-            self.gateway.on_order(order)
-
-        msg: str = f"批量委托失败，状态码：{status_code}，信息：{request.response.text}"
-        self.gateway.write_log(msg)
-
-    def on_send_orders_error(
-        self, exception_type: type, exception_value: Exception, tb, request: Request
-    ) -> None:
-        """批量下单回报函数报错回报"""
-        orders: List[OrderData] = request.extra
-
-        for order in orders:
-            order.status = Status.REJECTED
-            self.gateway.on_order(order)
-
-        if not issubclass(exception_type, ConnectionError):
-            self.on_error(exception_type, exception_value, tb, request)
 
     def check_error(self, data: dict, func: str = "") -> bool:
         """回报状态检查"""
