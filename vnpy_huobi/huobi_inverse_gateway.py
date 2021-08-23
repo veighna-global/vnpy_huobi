@@ -806,7 +806,7 @@ class HuobiInverseDataWebsocketApi(HuobiInverseWebsocketApiBase):
         self.subscribed[req.vt_symbol] = req
 
         # 创建TICK对象
-        tick = TickData(
+        tick: TickData = TickData(
             symbol=req.symbol,
             name=req.symbol,
             exchange=Exchange.HUOBI,
@@ -815,14 +815,12 @@ class HuobiInverseDataWebsocketApi(HuobiInverseWebsocketApiBase):
         )
         self.ticks[req.symbol] = tick
 
-        self.subscribe_data(req.symbol)
-
-        req_dict = {
+        req_dict: dict = {
             "sub": f"market.{req.symbol}.depth.step0"
         }
         self.send_packet(req_dict)
 
-        req_dict = {
+        req_dict: dict = {
             "sub": f"market.{req.symbol}.detail"
         }
         self.send_packet(req_dict)
@@ -856,7 +854,7 @@ class HuobiInverseDataWebsocketApi(HuobiInverseWebsocketApiBase):
             tick.__setattr__("bid_price_" + str(n + 1), float(price))
             tick.__setattr__("bid_volume_" + str(n + 1), float(volume))
 
-        asks = tick_data["asks"]
+        asks: list = tick_data["asks"]
         for n in range(min(5, len(asks))):
             price, volume = asks[n]
             tick.__setattr__("ask_price_" + str(n + 1), float(price))
