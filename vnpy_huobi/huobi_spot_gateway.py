@@ -272,12 +272,10 @@ class HuobiSpotRestApi(RestClient):
                 self.gateway.write_log(msg)
             else:
                 for d in data["data"]:
-                    dt: datetime = generate_datetime(d["id"])
-
                     bar = BarData(
                         symbol=req.symbol,
                         exchange=req.exchange,
-                        datetime=dt,
+                        datetime=generate_datetime(d["id"]),
                         interval=req.interval,
                         volume=d["vol"],
                         open_price=d["open"],
@@ -369,7 +367,6 @@ class HuobiSpotRestApi(RestClient):
 
         for d in data["data"]:
             direction, order_type = ORDERTYPE_HUOBI2VT[d["type"]]
-            dt: datetime = generate_datetime(d["created-at"] / 1000)
 
             order: OrderData = OrderData(
                 orderid=d["client-order-id"],
@@ -381,7 +378,7 @@ class HuobiSpotRestApi(RestClient):
                 direction=direction,
                 traded=float(d["filled-amount"]),
                 status=STATUS_HUOBI2VT.get(d["state"], None),
-                datetime=dt,
+                datetime=generate_datetime(d["created-at"] / 1000),
                 gateway_name=self.gateway_name,
             )
 

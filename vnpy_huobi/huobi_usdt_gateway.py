@@ -349,12 +349,10 @@ class HuobiInverseRestApi(RestClient):
 
                 buf: List[BarData] = []
                 for d in data["data"]:
-                    dt: datetime = generate_datetime(d["id"])
-
                     bar: BarData = BarData(
                         symbol=req.symbol,
                         exchange=req.exchange,
-                        datetime=dt,
+                        datetime=generate_datetime(d["id"]),
                         interval=req.interval,
                         volume=d["vol"],
                         turnover=d["trade_turnover"],
@@ -544,9 +542,6 @@ class HuobiInverseRestApi(RestClient):
             return
 
         for d in data["data"]["orders"]:
-            timestamp: float = d["created_at"]
-            dt: datetime = generate_datetime(timestamp / 1000)
-
             if d["client_order_id"]:
                 orderid: int = d["client_order_id"]
             else:
@@ -563,7 +558,7 @@ class HuobiInverseRestApi(RestClient):
                 offset=OFFSET_HUOBIS2VT[d["offset"]],
                 traded=d["trade_volume"],
                 status=STATUS_HUOBIS2VT[d["status"]],
-                datetime=dt,
+                datetime=generate_datetime(d["created_at"] / 1000),
                 gateway_name=self.gateway_name,
             )
             self.gateway.on_order(order)
@@ -827,8 +822,6 @@ class HuobiInverseTradeWebsocketApi(HuobiInverseWebsocketApiBase):
 
     def on_order(self, data: dict) -> None:
         """委托更新推送"""
-        dt: datetime = generate_datetime(data["created_at"] / 1000)
-
         if data["client_order_id"]:
             orderid: int = data["client_order_id"]
         else:
@@ -845,7 +838,7 @@ class HuobiInverseTradeWebsocketApi(HuobiInverseWebsocketApiBase):
             volume=data["volume"],
             traded=data["trade_volume"],
             status=STATUS_HUOBIS2VT[data["status"]],
-            datetime=dt,
+            datetime=generate_datetime(data["created_at"] / 1000),
             gateway_name=self.gateway_name
         )
         self.gateway.on_order(order)
@@ -856,8 +849,6 @@ class HuobiInverseTradeWebsocketApi(HuobiInverseWebsocketApiBase):
             return
 
         for d in trades:
-            dt: datetime = generate_datetime(d["created_at"] / 1000)
-
             trade: TradeData = TradeData(
                 symbol=order.symbol,
                 exchange=Exchange.HUOBI,
@@ -867,7 +858,7 @@ class HuobiInverseTradeWebsocketApi(HuobiInverseWebsocketApiBase):
                 offset=order.offset,
                 price=d["trade_price"],
                 volume=d["trade_volume"],
-                datetime=dt,
+                datetime=generate_datetime(d["created_at"] / 1000),
                 gateway_name=self.gateway_name,
             )
             self.gateway.on_trade(trade)
