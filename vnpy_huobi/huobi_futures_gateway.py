@@ -1,19 +1,11 @@
-import re
-import urllib
-import base64
 import json
-import zlib
-import hashlib
-import hmac
 from copy import copy
 from datetime import datetime, timedelta
-from threading import Lock
-from typing import Sequence, Dict, List, Any
-import pytz
+from typing import Dict, List, Any
+from collections import defaultdict
 
-from vnpy.event import Event, EventEngine
+from vnpy.event import EventEngine
 from vnpy_rest import RestClient, Request, Response
-from vnpy_websocket import WebsocketClient
 from vnpy.trader.constant import (
     Direction,
     Offset,
@@ -37,10 +29,8 @@ from vnpy.trader.object import (
     SubscribeRequest,
     HistoryRequest
 )
-from vnpy.trader.event import EVENT_TIMER
+from .huobi_apibase import _split_url, generate_datetime, create_signature, CHINA_TZ, HuobiWebsocketApiBase
 
-# 中国时区
-CHINA_TZ = pytz.timezone("Asia/Shanghai")
 
 # 实盘REST API地址
 REST_HOST: str = "https://api.hbdm.com"
@@ -154,8 +144,6 @@ class HuobiFuturesGateway(BaseGateway):
         self.trade_ws_api.connect(key, secret, proxy_host, proxy_port)
         self.market_ws_api.connect(key, secret, proxy_host, proxy_port)
 
-        self.init_query()
-
     def subscribe(self, req: SubscribeRequest) -> None:
         """订阅行情"""
         self.market_ws_api.subscribe(req)
@@ -168,17 +156,13 @@ class HuobiFuturesGateway(BaseGateway):
         """委托撤单"""
         self.rest_api.cancel_order(req)
 
-    def send_orders(self, reqs: Sequence[OrderRequest]):
-        """批量下单"""
-        return self.rest_api.send_orders(reqs)
-
     def query_account(self) -> None:
         """查询资金"""
-        self.rest_api.query_account()
+        pass
 
     def query_position(self) -> None:
         """查询持仓"""
-        self.rest_api.query_position()
+        pass
 
     def query_history(self, req: HistoryRequest):
         """查询历史数据"""
@@ -189,20 +173,6 @@ class HuobiFuturesGateway(BaseGateway):
         self.rest_api.stop()
         self.trade_ws_api.stop()
         self.market_ws_api.stop()
-
-    def process_timer_event(self, event: Event) -> None:
-        """定时事件处理"""
-        self.count += 1
-        if self.count < 3:
-            return
-
-        self.query_account()
-        self.query_position()
-
-    def init_query(self) -> None:
-        """初始化查询任务"""
-        self.count: int = 0
-        self.event_engine.register(EVENT_TIMER, self.process_timer_event)
 
 
 class HuobiFuturesRestApi(RestClient):
@@ -221,7 +191,6 @@ class HuobiFuturesRestApi(RestClient):
         self.account_id: str = ""
 
         self.order_count: int = 0
-        self.positions: Dict[str, PositionData] = {}
         self.currencies: List[str] = set()
 
     def sign(self, request: Request) -> Request:
@@ -265,22 +234,6 @@ class HuobiFuturesRestApi(RestClient):
         self.gateway.write_log("REST API启动成功")
 
         self.query_contract()
-
-    def query_account(self) -> None:
-        """查询资金"""
-        self.add_request(
-            method="POST",
-            path="/api/v1/contract_account_info",
-            callback=self.on_query_account
-        )
-
-    def query_position(self) -> None:
-        """查询未成交委托"""
-        self.add_request(
-            method="POST",
-            path="/api/v1/contract_position_info",
-            callback=self.on_query_position
-        )
 
     def query_order(self) -> None:
         """查询合约信息"""
@@ -350,12 +303,10 @@ class HuobiFuturesRestApi(RestClient):
 
                 buf: List[BarData] = []
                 for d in data["data"]:
-                    dt: datetime = generate_datetime(d["id"])
-
                     bar: BarData = BarData(
                         symbol=req.symbol,
                         exchange=req.exchange,
-                        datetime=dt,
+                        datetime=generate_datetime(d["id"]),
                         interval=req.interval,
                         volume=d["vol"],
                         open_price=d["open"],
@@ -425,52 +376,6 @@ class HuobiFuturesRestApi(RestClient):
         self.gateway.on_order(order)
         return order.vt_orderid
 
-    def send_orders(self, reqs: Sequence[OrderRequest]) -> List[str]:
-        """批量下单"""
-        orders_data: List[Dict] = []
-        orders: List[OrderData] = []
-        vt_orderids: List[str] = []
-
-        for req in reqs:
-            orderid: str = self.new_orderid()
-
-            order: OrderData = req.create_order_data(
-                orderid,
-                self.gateway_name
-            )
-            order.datetime = datetime.now(CHINA_TZ)
-            self.gateway.on_order(order)
-
-            d: dict = {
-                "contract_code": req.symbol,
-                "client_order_id": int(orderid),
-                "price": req.price,
-                "volume": int(req.volume),
-                "direction": DIRECTION_VT2HUOBIF.get(req.direction, ""),
-                "offset": OFFSET_VT2HUOBIF.get(req.offset, ""),
-                "order_price_type": ORDERTYPE_VT2HUOBIF.get(req.type, ""),
-                "lever_rate": 20
-            }
-
-            orders_data.append(d)
-            orders.append(order)
-            vt_orderids.append(order.vt_orderid)
-
-        data: dict = {
-            "orders_data": orders_data
-        }
-
-        self.add_request(
-            method="POST",
-            path="/api/v1/contract_batchorder",
-            callback=self.on_send_orders,
-            data=data,
-            extra=orders,
-            on_error=self.on_send_orders_error,
-            on_failed=self.on_send_orders_failed
-        )
-        return vt_orderids
-
     def cancel_order(self, req: CancelRequest) -> None:
         """委托撤单"""
         buf: List[str] = [i for i in req.symbol if not i.isdigit()]
@@ -493,63 +398,13 @@ class HuobiFuturesRestApi(RestClient):
             data=data,
             extra=req
         )
-
-    def on_query_account(self, data: dict, request: Request) -> None:
-        """资金查询回报"""
-        if self.check_error(data, "查询账户"):
-            return
-
-        for d in data["data"]:
-            account: AccountData = AccountData(
-                accountid=d["symbol"],
-                balance=d["margin_balance"],
-                frozen=d["margin_frozen"],
-                gateway_name=self.gateway_name,
-            )
-
-            self.gateway.on_account(account)
-
-    def on_query_position(self, data: dict, request: Request) -> None:
-        """持仓查询回报"""
-        if self.check_error(data, "查询持仓"):
-            return
-
-        for position in self.positions.values():
-            position.volume = 0
-            position.frozen = 0
-            position.price = 0
-            position.pnl = 0
-
-        for d in data["data"]:
-            key: str = f"{d['contract_code']}_{d['direction']}"
-            position: PositionData = self.positions.get(key, None)
-
-            if not position:
-                position: PositionData = PositionData(
-                    symbol=d["contract_code"],
-                    exchange=Exchange.HUOBI,
-                    direction=DIRECTION_HUOBIF2VT[d["direction"]],
-                    gateway_name=self.gateway_name
-                )
-                self.positions[key] = position
-
-            position.volume = d["volume"]
-            position.frozen = d["frozen"]
-            position.price = d["cost_hold"]
-            position.pnl = d["profit"]
-
-        for position in self.positions.values():
-            self.gateway.on_position(position)
-
+ 
     def on_query_order(self, data: dict, request: Request) -> None:
         """未成交委托查询回报"""
         if self.check_error(data, "查询活动委托"):
             return
 
         for d in data["data"]["orders"]:
-            timestamp: float = d["created_at"]
-            dt: datetime = generate_datetime(timestamp / 1000)
-
             if d["client_order_id"]:
                 orderid: int = d["client_order_id"]
             else:
@@ -566,7 +421,7 @@ class HuobiFuturesRestApi(RestClient):
                 offset=OFFSET_HUOBIF2VT[d["offset"]],
                 traded=d["trade_volume"],
                 status=STATUS_HUOBIF2VT[d["status"]],
-                datetime=dt,
+                datetime=generate_datetime(d["created_at"] / 1000),
                 gateway_name=self.gateway_name,
             )
             self.gateway.on_order(order)
@@ -637,48 +492,6 @@ class HuobiFuturesRestApi(RestClient):
         msg: str = f"撤单失败，状态码：{status_code}，信息：{request.response.text}"
         self.gateway.write_log(msg)
 
-    def on_send_orders(self, data: dict, request: Request) -> None:
-        """批量下单回报"""
-        orders: List[OrderData] = request.extra
-
-        errors: dict = data.get("errors", None)
-        if errors:
-            for d in errors:
-                ix: int = d["index"]
-                code: int = d["err_code"]
-                msg: str = d["err_msg"]
-
-                order: OrderData = orders[ix]
-                order.status = Status.REJECTED
-                self.gateway.on_order(order)
-
-                msg: str = f"批量委托失败，状态码：{code}，信息：{msg}"
-                self.gateway.write_log(msg)
-
-    def on_send_orders_failed(self, status_code: str, request: Request) -> None:
-        """批量下单失败服务器报错回报"""
-        orders: List[OrderData] = request.extra
-
-        for order in orders:
-            order.status = Status.REJECTED
-            self.gateway.on_order(order)
-
-        msg: str = f"批量委托失败，状态码：{status_code}，信息：{request.response.text}"
-        self.gateway.write_log(msg)
-
-    def on_send_orders_error(
-        self, exception_type: type, exception_value: Exception, tb, request: Request
-    ) -> None:
-        """批量下单回报函数报错回报"""
-        orders: List[OrderData] = request.extra
-
-        for order in orders:
-            order.status = Status.REJECTED
-            self.gateway.on_order(order)
-
-        if not issubclass(exception_type, ConnectionError):
-            self.on_error(exception_type, exception_value, tb, request)
-
     def check_error(self, data: dict, func: str = "") -> bool:
         """回报状态检查"""
         if data["status"] != "error":
@@ -691,92 +504,14 @@ class HuobiFuturesRestApi(RestClient):
         return True
 
 
-class HuobiFuturesWebsocketApiBase(WebsocketClient):
-    """火币交割合约Websocket APIBase"""
-
-    def __init__(self, gateway: HuobiFuturesGateway) -> None:
-        """构造函数"""
-        super().__init__()
-
-        self.gateway: HuobiFuturesGateway = gateway
-        self.gateway_name: str = gateway.gateway_name
-
-        self.key: str = ""
-        self.secret: str = ""
-        self.sign_host: str = ""
-        self.path: str = ""
-
-    def connect(
-        self,
-        key: str,
-        secret: str,
-        url: str,
-        proxy_host: str,
-        proxy_port: int
-    ) -> None:
-        """连接Websocket频道"""
-        self.key = key
-        self.secret = secret
-
-        host, path = _split_url(url)
-        self.sign_host = host
-        self.path = path
-
-        self.init(url, proxy_host, proxy_port)
-        self.start()
-
-    def login(self) -> int:
-        """用户登录"""
-
-        params: dict = {
-            "op": "auth",
-            "type": "api"
-        }
-        params.update(create_signature(self.key, "GET", self.sign_host, self.path, self.secret))
-        return self.send_packet(params)
-
-    def on_login(self, packet: dict) -> None:
-        """用户登录回报"""
-        pass
-
-    @staticmethod
-    def unpack_data(data) -> json.JSONDecoder:
-        """数据解压"""
-        return json.loads(zlib.decompress(data, 31))
-
-    def on_packet(self, packet: dict) -> None:
-        """推送数据回报"""
-        if "ping" in packet:
-            req: dict = {"pong": packet["ping"]}
-            self.send_packet(req)
-        elif "op" in packet and packet["op"] == "ping":
-            req: dict = {
-                "op": "pong",
-                "ts": packet["ts"]
-            }
-            self.send_packet(req)
-        elif "err-msg" in packet:
-            return self.on_error_msg(packet)
-        elif "op" in packet and packet["op"] == "auth":
-            return self.on_login()
-        else:
-            self.on_data(packet)
-
-    def on_error_msg(self, packet: dict) -> None:
-        """推送错误信息回报"""
-        msg: str = packet["err-msg"]
-        if msg == "invalid pong":
-            return
-
-        self.gateway.write_log(packet["err-msg"])
-
-
-class HuobiFuturesTradeWebsocketApi(HuobiFuturesWebsocketApiBase):
+class HuobiFuturesTradeWebsocketApi(HuobiWebsocketApiBase):
     """火币交割合约交易Websocket API"""
 
-    def __init__(self, gateway):
+    def __init__(self, gateway: HuobiFuturesGateway):
         """构造函数"""
         super().__init__(gateway)
+
+        self.positions: Dict[str, PositionData] = defaultdict(dict)
 
     def connect(
         self,
@@ -795,10 +530,22 @@ class HuobiFuturesTradeWebsocketApi(HuobiFuturesWebsocketApiBase):
         )
 
     def subscribe(self) -> None:
-        """订阅委托推送"""
+        """订阅委托和资金、持仓推送"""
         req: dict = {
             "op": "sub",
             "topic": f"orders.*"
+        }
+        self.send_packet(req)
+
+        req: dict = {
+            "op": "sub",
+            "topic": f"accounts.*"
+        }
+        self.send_packet(req)
+
+        req: dict = {
+            "op": "sub",
+            "topic": f"positions.*"
         }
         self.send_packet(req)
 
@@ -821,11 +568,13 @@ class HuobiFuturesTradeWebsocketApi(HuobiFuturesWebsocketApiBase):
         topic: str = packet["topic"]
         if "orders" in topic:
             self.on_order(packet)
+        elif "accounts" in topic:
+            self.on_account(packet)
+        elif "positions" in topic:
+            self.on_position(packet)
 
     def on_order(self, data: dict) -> None:
         """委托更新推送"""
-        dt: datetime = generate_datetime(data["created_at"] / 1000)
-
         if data["client_order_id"]:
             orderid = data["client_order_id"]
         else:
@@ -842,7 +591,7 @@ class HuobiFuturesTradeWebsocketApi(HuobiFuturesWebsocketApiBase):
             volume=data["volume"],
             traded=data["trade_volume"],
             status=STATUS_HUOBIF2VT[data["status"]],
-            datetime=dt,
+            datetime=generate_datetime(data["created_at"] / 1000),
             gateway_name=self.gateway_name
         )
         self.gateway.on_order(order)
@@ -853,8 +602,6 @@ class HuobiFuturesTradeWebsocketApi(HuobiFuturesWebsocketApiBase):
             return
 
         for d in trades:
-            dt: datetime = generate_datetime(d["created_at"] / 1000)
-
             trade: TradeData = TradeData(
                 symbol=order.symbol,
                 exchange=Exchange.HUOBI,
@@ -864,16 +611,57 @@ class HuobiFuturesTradeWebsocketApi(HuobiFuturesWebsocketApiBase):
                 offset=order.offset,
                 price=d["trade_price"],
                 volume=d["trade_volume"],
-                datetime=dt,
+                datetime=generate_datetime(d["created_at"] / 1000),
                 gateway_name=self.gateway_name,
             )
             self.gateway.on_trade(trade)
 
+    def on_account(self, data: dict) -> None:
+        """资金更新推送"""
+        if not data:
+            return
 
-class HuobiFuturesDataWebsocketApi(HuobiFuturesWebsocketApiBase):
+        for d in data["data"]:
+            account: AccountData = AccountData(
+                accountid=d["symbol"],
+                balance=d["margin_balance"],
+                frozen=d["margin_frozen"],
+                gateway_name=self.gateway_name
+            )
+
+            self.gateway.on_account(account)
+
+    def on_position(self, data: dict) -> None:
+        """持仓更新推送"""
+        if not data:
+            return
+
+        for d in data["data"]:
+            key: str = f"{d['contract_code']}_{d['direction']}"
+            position: PositionData = self.positions.get(key, None)
+
+            if not position:
+                position: PositionData = PositionData(
+                    symbol=d["contract_code"],
+                    exchange=Exchange.HUOBI,
+                    direction=DIRECTION_HUOBIF2VT[d["direction"]],
+                    gateway_name=self.gateway_name
+                )
+                self.positions[key] = position
+
+            position.volume = d["volume"]
+            position.frozen = d["frozen"]
+            position.price = d["cost_hold"]
+            position.pnl = d["profit"]
+
+        for position in self.positions.values():
+            self.gateway.on_position(position)
+
+
+class HuobiFuturesDataWebsocketApi(HuobiWebsocketApiBase):
     """火币交割合约行情Websocket API"""
 
-    def __init__(self, gateway):
+    def __init__(self, gateway: HuobiFuturesGateway):
         """构造函数"""
         super().__init__(gateway)
 
@@ -994,56 +782,3 @@ class HuobiFuturesDataWebsocketApi(HuobiFuturesWebsocketApiBase):
             tick.localtime = datetime.now()
             self.gateway.on_tick(copy(tick))
 
-
-def _split_url(url):
-    """
-    将url拆分为host和path
-    :return: host, path
-    """
-    result = re.match("\w+://([^/]*)(.*)", url)  # noqa
-    if result:
-        return result.group(1), result.group(2)
-
-
-def create_signature(
-    api_key,
-    method,
-    host,
-    path,
-    secret_key,
-    get_params=None
-) -> Dict[str, str]:
-    """
-    创建Rest接口签名
-    """
-    sorted_params: list = [
-        ("AccessKeyId", api_key),
-        ("SignatureMethod", "HmacSHA256"),
-        ("SignatureVersion", "2"),
-        ("Timestamp", datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"))
-    ]
-
-    if get_params:
-        sorted_params.extend(list(get_params.items()))
-        sorted_params = list(sorted(sorted_params))
-    encode_params = urllib.parse.urlencode(sorted_params)
-
-    payload: list = [method, host, path, encode_params]
-    payload: str = "\n".join(payload)
-    payload: str = payload.encode(encoding="UTF8")
-
-    secret_key: str = secret_key.encode(encoding="UTF8")
-
-    digest: bytes = hmac.new(secret_key, payload, digestmod=hashlib.sha256).digest()
-    signature: bytes = base64.b64encode(digest)
-
-    params: dict = dict(sorted_params)
-    params["Signature"] = signature.decode("UTF8")
-    return params
-
-
-def generate_datetime(timestamp: float) -> datetime:
-    """生成时间"""
-    dt: datetime = datetime.fromtimestamp(timestamp)
-    dt: datetime = CHINA_TZ.localize(dt)
-    return dt

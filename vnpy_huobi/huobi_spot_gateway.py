@@ -1,18 +1,10 @@
-import re
-import urllib
-import base64
 import json
-import zlib
-import hashlib
-import hmac
 from copy import copy
 from datetime import datetime
-import pytz
 from typing import Dict, List, Tuple
 from vnpy.trader.utility import round_to
 
 from vnpy_rest import RestClient, Request, Response
-from vnpy_websocket import WebsocketClient
 from vnpy.trader.constant import (
     Direction,
     Exchange,
@@ -35,9 +27,8 @@ from vnpy.trader.object import (
     HistoryRequest
 )
 from vnpy.event import EventEngine
+from .huobi_apibase import _split_url, generate_datetime, create_signature, CHINA_TZ, HuobiWebsocketApiBase
 
-# 中国时区
-CHINA_TZ = pytz.timezone("Asia/Shanghai")
 
 # 实盘REST API地址
 REST_HOST: str = "https://api.huobipro.com"
@@ -57,13 +48,13 @@ STATUS_HUOBI2VT: Dict[str, Status] = {
 }
 
 # 委托类型映射
-ORDERTYPE_VT2HUOBI: Dict[Tuple(Direction, OrderType), str] = {
+ORDERTYPE_VT2HUOBI: Dict[Tuple[Direction, OrderType], str] = {
     (Direction.LONG, OrderType.MARKET): "buy-market",
     (Direction.SHORT, OrderType.MARKET): "sell-market",
     (Direction.LONG, OrderType.LIMIT): "buy-limit",
     (Direction.SHORT, OrderType.LIMIT): "sell-limit",
 }
-ORDERTYPE_HUOBI2VT: Dict[str, Tuple(Direction, OrderType)] = {v: k for k, v in ORDERTYPE_VT2HUOBI.items()}
+ORDERTYPE_HUOBI2VT: Dict[str, Tuple[Direction, OrderType]] = {v: k for k, v in ORDERTYPE_VT2HUOBI.items()}
 
 # 数据频率映射
 INTERVAL_VT2HUOBI: Dict[Interval, str] = {
@@ -272,12 +263,10 @@ class HuobiSpotRestApi(RestClient):
                 self.gateway.write_log(msg)
             else:
                 for d in data["data"]:
-                    dt: datetime = generate_datetime(d["id"])
-
                     bar = BarData(
                         symbol=req.symbol,
                         exchange=req.exchange,
-                        datetime=dt,
+                        datetime=generate_datetime(d["id"]),
                         interval=req.interval,
                         volume=d["vol"],
                         open_price=d["open"],
@@ -369,7 +358,6 @@ class HuobiSpotRestApi(RestClient):
 
         for d in data["data"]:
             direction, order_type = ORDERTYPE_HUOBI2VT[d["type"]]
-            dt: datetime = generate_datetime(d["created-at"] / 1000)
 
             order: OrderData = OrderData(
                 orderid=d["client-order-id"],
@@ -381,7 +369,7 @@ class HuobiSpotRestApi(RestClient):
                 direction=direction,
                 traded=float(d["filled-amount"]),
                 status=STATUS_HUOBI2VT.get(d["state"], None),
-                datetime=dt,
+                datetime=generate_datetime(d["created-at"] / 1000),
                 gateway_name=self.gateway_name,
             )
 
@@ -472,103 +460,10 @@ class HuobiSpotRestApi(RestClient):
         return True
 
 
-class HuobiSpotWebsocketApiBase(WebsocketClient):
-    """火币现货Websocket APIBase"""
-
-    def __init__(self, gateway: HuobiSpotGateway) -> None:
-        """构造函数"""
-        super().__init__()
-
-        self.gateway: HuobiSpotGateway = gateway
-        self.gateway_name: str = gateway.gateway_name
-
-        self.key: str = ""
-        self.secret: str = ""
-        self.sign_host: str = ""
-        self.path: str = ""
-
-    def connect(
-        self,
-        key: str,
-        secret: str,
-        url: str,
-        proxy_host: str,
-        proxy_port: int
-    ) -> None:
-        """连接Websocket频道"""
-        self.key = key
-        self.secret = secret
-
-        host, path = _split_url(url)
-        self.sign_host = host
-        self.path = path
-
-        self.init(url, proxy_host, proxy_port)
-        self.start()
-
-    def login(self) -> int:
-        """用户登录"""
-        params: dict = create_signature_v2(
-            self.key,
-            "GET",
-            self.sign_host,
-            self.path,
-            self.secret
-        )
-
-        req: dict = {
-            "action": "req",
-            "ch": "auth",
-            "params": params
-        }
-
-        return self.send_packet(req)
-
-    def on_login(self, packet: dict) -> None:
-        """用户登录回报"""
-        pass
-
-    @staticmethod
-    def unpack_data(data) -> json.JSONDecoder:
-        """数据解压"""
-        if isinstance(data, bytes):
-            buf: bytes = zlib.decompress(data, 31)
-        else:
-            buf: str = data
-
-        return json.loads(buf)
-
-    def on_packet(self, packet: dict) -> None:
-        """推送数据回报"""
-        if "ping" in packet:
-            req: dict = {"pong": packet["ping"]}
-            self.send_packet(req)
-        elif "action" in packet and packet["action"] == "ping":
-            req: dict = {
-                "action": "pong",
-                "ts": packet["data"]["ts"]
-            }
-            self.send_packet(req)
-        elif "err-msg" in packet:
-            return self.on_error_msg(packet)
-        elif "action" in packet and packet["action"] == "req":
-            return self.on_login(packet)
-        else:
-            self.on_data(packet)
-
-    def on_error_msg(self, packet: dict) -> None:
-        """推送错误信息回报"""
-        msg: str = packet["err-msg"]
-        if msg == "invalid pong":
-            return
-
-        self.gateway.write_log(packet["err-msg"])
-
-
-class HuobiSpotTradeWebsocketApi(HuobiSpotWebsocketApiBase):
+class HuobiSpotTradeWebsocketApi(HuobiWebsocketApiBase):
     """火币现货交易Websocket API"""
 
-    def __init__(self, gateway):
+    def __init__(self, gateway: HuobiSpotGateway):
         """构造函数"""
         super().__init__(gateway)
 
@@ -605,7 +500,7 @@ class HuobiSpotTradeWebsocketApi(HuobiSpotWebsocketApiBase):
     def on_connected(self) -> None:
         """连接成功回报"""
         self.gateway.write_log("交易Websocket API连接成功")
-        self.login()
+        self.login(v2=True)
 
     def on_login(self, packet: dict) -> None:
         """登录成功回报"""
@@ -697,10 +592,10 @@ class HuobiSpotTradeWebsocketApi(HuobiSpotWebsocketApiBase):
         self.gateway.on_trade(trade)
 
 
-class HuobiSpotDataWebsocketApi(HuobiSpotWebsocketApiBase):
+class HuobiSpotDataWebsocketApi(HuobiWebsocketApiBase):
     """火币现货行情Websocket API"""
 
-    def __init__(self, gateway):
+    def __init__(self, gateway: HuobiSpotGateway):
         """构造函数"""
         super().__init__(gateway)
 
@@ -812,95 +707,3 @@ class HuobiSpotDataWebsocketApi(HuobiSpotWebsocketApiBase):
         if tick.bid_price_1:
             tick.localtime = datetime.now()
             self.gateway.on_tick(copy(tick))
-
-
-def _split_url(url):
-    """
-    将url拆分为host和path
-    :return: host, path
-    """
-    result = re.match("\w+://([^/]*)(.*)", url)  # noqa
-    if result:
-        return result.group(1), result.group(2)
-
-
-def create_signature(
-    api_key,
-    method,
-    host,
-    path,
-    secret_key,
-    get_params=None
-) -> Dict[str, str]:
-    """
-    创建Rest接口签名
-    """
-    sorted_params: list = [
-        ("AccessKeyId", api_key),
-        ("SignatureMethod", "HmacSHA256"),
-        ("SignatureVersion", "2"),
-        ("Timestamp", datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"))
-    ]
-
-    if get_params:
-        sorted_params.extend(list(get_params.items()))
-        sorted_params = list(sorted(sorted_params))
-    encode_params = urllib.parse.urlencode(sorted_params)
-
-    payload: list = [method, host, path, encode_params]
-    payload: str = "\n".join(payload)
-    payload: str = payload.encode(encoding="UTF8")
-
-    secret_key: str = secret_key.encode(encoding="UTF8")
-
-    digest: bytes = hmac.new(secret_key, payload, digestmod=hashlib.sha256).digest()
-    signature: bytes = base64.b64encode(digest)
-
-    params: dict = dict(sorted_params)
-    params["Signature"] = signature.decode("UTF8")
-    return params
-
-
-def create_signature_v2(
-    api_key,
-    method,
-    host,
-    path,
-    secret_key,
-    get_params=None
-) -> Dict[str, str]:
-    """
-    创建WebSocket接口签名
-    """
-    sorted_params: list = [
-        ("accessKey", api_key),
-        ("signatureMethod", "HmacSHA256"),
-        ("signatureVersion", "2.1"),
-        ("timestamp", datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"))
-    ]
-
-    if get_params:
-        sorted_params.extend(list(get_params.items()))
-        sorted_params = list(sorted(sorted_params))
-    encode_params = urllib.parse.urlencode(sorted_params)
-
-    payload: list = [method, host, path, encode_params]
-    payload: str = "\n".join(payload)
-    payload: str = payload.encode(encoding="UTF8")
-
-    secret_key: str = secret_key.encode(encoding="UTF8")
-
-    digest: bytes = hmac.new(secret_key, payload, digestmod=hashlib.sha256).digest()
-    signature: bytes = base64.b64encode(digest)
-
-    params: dict = dict(sorted_params)
-    params["authType"] = "api"
-    params["signature"] = signature.decode("UTF8")
-    return params
-
-
-def generate_datetime(timestamp: float) -> datetime:
-    """生成时间"""
-    dt: datetime = datetime.fromtimestamp(timestamp)
-    dt: datetime = CHINA_TZ.localize(dt)
-    return dt
