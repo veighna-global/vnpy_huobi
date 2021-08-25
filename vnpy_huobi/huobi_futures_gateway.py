@@ -1,7 +1,7 @@
 import json
 from copy import copy
 from datetime import datetime, timedelta
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Set
 from collections import defaultdict
 
 from vnpy.event import EventEngine
@@ -191,7 +191,7 @@ class HuobiFuturesRestApi(RestClient):
         self.account_id: str = ""
 
         self.order_count: int = 0
-        self.currencies: List[str] = set()
+        self.currencies: Set[str] = set()
 
     def sign(self, request: Request) -> Request:
         """生成火币签名"""
@@ -236,7 +236,7 @@ class HuobiFuturesRestApi(RestClient):
         self.query_contract()
 
     def query_order(self) -> None:
-        """查询合约信息"""
+        """查询未成交委托"""
         for currency in self.currencies:
             data = {"symbol": currency}
 
