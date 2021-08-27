@@ -486,6 +486,15 @@ class HuobiUsdtRestApi(RestClient):
         msg: str = f"撤单失败，状态码：{status_code}，信息：{request.response.text}"
         self.gateway.write_log(msg)
 
+    def on_error(
+        self, exception_type: type, exception_value: Exception, tb, request: Request
+    ) -> None:
+        """请求触发异常的回调"""
+        msg: str = f"触发异常，状态码：{exception_type}，信息：{exception_value}"
+        self.gateway.write_log(msg)
+
+        super().on_error(exception_type, exception_value, tb, request)
+
     def check_error(self, data: dict, func: str = "") -> bool:
         """回报状态检查"""
         if data["status"] != "error":
