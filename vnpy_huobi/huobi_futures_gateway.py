@@ -335,12 +335,12 @@ class HuobiFuturesRestApi(RestClient):
 
     def new_orderid(self) -> str:
         """生成本地委托号"""
-        prefix: str = datetime.now().strftime("%Y%m%d-%H%M%S-")
+        prefix: str = datetime.now().strftime("%Y%m%d%H%M%S")
 
         self.order_count += 1
-        suffix: str = str(self.order_count).rjust(8, "0")
+        suffix: str = str(self.order_count).rjust(6, "0")
 
-        orderid: str = prefix + suffix
+        orderid: str = prefix[2:] + suffix
         return orderid
 
     def send_order(self, req: OrderRequest) -> str:
