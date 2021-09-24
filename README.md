@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-    <img src ="https://img.shields.io/badge/version-2021.8.15-blueviolet.svg"/>
+    <img src ="https://img.shields.io/badge/version-2021.9.24-blueviolet.svg"/>
     <img src ="https://img.shields.io/badge/platform-windows|linux|macos-yellow.svg"/>
     <img src ="https://img.shields.io/badge/python-3.7-blue.svg" />
     <img src ="https://img.shields.io/github/license/vnpy/vnpy.svg?color=orange"/>
@@ -13,15 +13,15 @@
 
 ## 说明
 
-基于火币交易所的API开发，支持账户下的现货、期货、永续交易。
+基于火币交易所的API开发，支持账户下的现货、期货、永续合约（正反向）交易。
 
-使用时需要注意本接口只支持全仓保证金模式。
+**注意：本接口只支持全仓保证金模式**。
 
-请在火币网站完成账户的相应设置后再使用。
+请在火币网站完成账户的相应设置后使用。
 
 ## 安装
 
-安装需要基于2.2.0版本以上的[VN Studio](https://www.vnpy.com)。
+安装需要基于2.6.0版本以上的[VN Studio](https://www.vnpy.com)。
 
 直接使用pip命令：
 
