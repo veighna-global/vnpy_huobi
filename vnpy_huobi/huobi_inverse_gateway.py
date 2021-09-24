@@ -129,7 +129,7 @@ class HuobiInverseGateway(BaseGateway):
         else:
             proxy_port = 0
 
-        self.rest_api.connect(key, secret,proxy_host, proxy_port)
+        self.rest_api.connect(key, secret, proxy_host, proxy_port)
         self.trade_ws_api.connect(key, secret, proxy_host, proxy_port)
         self.market_ws_api.connect(key, secret, proxy_host, proxy_port)
 
@@ -461,7 +461,12 @@ class HuobiInverseRestApi(RestClient):
         msg: str = f"委托失败，状态码：{status_code}，信息：{request.response.text}"
         self.gateway.write_log(msg)
 
-    def on_send_order_error(self, exception_type: type, exception_value: Exception, tb, request: Request
+    def on_send_order_error(
+        self,
+        exception_type: type,
+        exception_value: Exception,
+        tb,
+        request: Request
     ) -> None:
         """委托下单回报函数报错回报"""
         order: OrderData = request.extra
@@ -499,6 +504,7 @@ class HuobiInverseRestApi(RestClient):
 
         self.gateway.write_log(f"{func}请求出错，代码：{error_code}，信息：{error_msg}")
         return True
+
 
 class HuobiInverseTradeWebsocketApi(HuobiWebsocketApiBase):
     """火币币本位永续合约交易Websocket API"""
@@ -725,12 +731,12 @@ class HuobiInverseDataWebsocketApi(HuobiWebsocketApiBase):
             self.gateway.write_log(f"错误代码：{code}, 错误信息：{msg}")
 
     def on_market_depth(self, data: dict) -> None:
-        """行情深度推送 """
+        """行情深度推送"""
         ws_symbol: str = data["ch"].split(".")[1]
         tick: TickData = self.ticks[ws_symbol]
         tick.datetime = generate_datetime(data["ts"] / 1000)
 
-        tick_data : dict= data["tick"]
+        tick_data: dict = data["tick"]
         if "bids" not in tick_data or "asks" not in tick_data:
             return
 

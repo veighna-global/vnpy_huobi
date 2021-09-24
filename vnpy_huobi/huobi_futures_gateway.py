@@ -140,7 +140,7 @@ class HuobiFuturesGateway(BaseGateway):
         else:
             proxy_port = 0
 
-        self.rest_api.connect(key, secret,proxy_host, proxy_port)
+        self.rest_api.connect(key, secret, proxy_host, proxy_port)
         self.trade_ws_api.connect(key, secret, proxy_host, proxy_port)
         self.market_ws_api.connect(key, secret, proxy_host, proxy_port)
 
@@ -325,7 +325,7 @@ class HuobiFuturesRestApi(RestClient):
                 self.gateway.write_log(msg)
 
                 # 更新开始时间
-                start: datetime= bar.datetime
+                start: datetime = bar.datetime
 
                 # 如果收到了最后一批数据则终止循环
                 if len(buf) < count:
@@ -398,7 +398,7 @@ class HuobiFuturesRestApi(RestClient):
             data=data,
             extra=req
         )
- 
+
     def on_query_order(self, data: dict, request: Request) -> None:
         """未成交委托查询回报"""
         if self.check_error(data, "查询活动委托"):
@@ -790,4 +790,3 @@ class HuobiFuturesDataWebsocketApi(HuobiWebsocketApiBase):
         if tick.bid_price_1:
             tick.localtime = datetime.now()
             self.gateway.on_tick(copy(tick))
-

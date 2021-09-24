@@ -129,7 +129,7 @@ class HuobiUsdtGateway(BaseGateway):
         else:
             proxy_port = 0
 
-        self.rest_api.connect(key, secret,proxy_host, proxy_port)
+        self.rest_api.connect(key, secret, proxy_host, proxy_port)
         self.trade_ws_api.connect(key, secret, proxy_host, proxy_port)
         self.market_ws_api.connect(key, secret, proxy_host, proxy_port)
 
@@ -467,7 +467,12 @@ class HuobiUsdtRestApi(RestClient):
         msg: str = f"委托失败，状态码：{status_code}，信息：{request.response.text}"
         self.gateway.write_log(msg)
 
-    def on_send_order_error(self, exception_type: type, exception_value: Exception, tb, request: Request
+    def on_send_order_error(
+        self,
+        exception_type: type,
+        exception_value: Exception,
+        tb,
+        request: Request
     ) -> None:
         """委托下单回报函数报错回报"""
         order: OrderData = request.extra
@@ -660,6 +665,7 @@ class HuobiUsdtTradeWebsocketApi(HuobiWebsocketApiBase):
         for position in self.positions.values():
             self.gateway.on_position(position)
 
+
 class HuobiUsdtDataWebsocketApi(HuobiWebsocketApiBase):
     """火币USDT本位永续合约行情Websocket API"""
 
@@ -737,7 +743,7 @@ class HuobiUsdtDataWebsocketApi(HuobiWebsocketApiBase):
         tick: TickData = self.ticks[ws_symbol]
         tick.datetime = generate_datetime(data["ts"] / 1000)
 
-        tick_data : dict= data["tick"]
+        tick_data: dict = data["tick"]
         if "bids" not in tick_data or "asks" not in tick_data:
             return
 

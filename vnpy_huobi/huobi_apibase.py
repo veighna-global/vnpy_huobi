@@ -59,13 +59,13 @@ class HuobiWebsocketApiBase(WebsocketClient):
                 self.path,
                 self.secret
             )
-    
+
             req: dict = {
                 "action": "req",
                 "ch": "auth",
                 "params": params
             }
-    
+
             return self.send_packet(req)
         else:
             params: dict = {
@@ -141,7 +141,7 @@ def _split_url(url) -> str:
     将url拆分为host和path
     :return: host, path
     """
-    result = re.match("\w+://([^/]*)(.*)", url)
+    result = re.match(r"\w+://([^/]*)(.*)", url)
     if result:
         return result.group(1), result.group(2)
 
