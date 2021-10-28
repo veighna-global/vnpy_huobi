@@ -1,6 +1,7 @@
 import json
 from copy import copy
 from datetime import datetime, timedelta
+from time import sleep
 from typing import Dict, List, Any, Set
 from collections import defaultdict
 
@@ -248,6 +249,7 @@ class HuobiUsdtRestApi(RestClient):
             data=data,
             callback=self.on_query_contract
         )
+        sleep(0.1)
 
     def query_history(self, req: HistoryRequest) -> List[BarData]:
         """查询历史数据"""
