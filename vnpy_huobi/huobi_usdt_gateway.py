@@ -249,7 +249,7 @@ class HuobiUsdtRestApi(RestClient):
             data=data,
             callback=self.on_query_contract
         )
-        sleep(0.1)
+        sleep(0.2)
 
     def query_history(self, req: HistoryRequest) -> List[BarData]:
         """查询历史数据"""
